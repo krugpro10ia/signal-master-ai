@@ -1,10 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { TrendingUp, TrendingDown, Zap, Upload, Users, Building2, Crown, ArrowRight, Activity, ExternalLink, CheckCircle2 } from "lucide-react"
+import { TrendingUp, TrendingDown, Zap, Upload, Users, Building2, Crown, ArrowRight, Activity, ExternalLink, CheckCircle2, LogOut, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { supabase, isSupabaseConfigured } from "@/lib/supabase"
+import { AuthModal } from "@/components/AuthModal"
 
 const cryptos = [
   { symbol: "BTC", name: "Bitcoin", price: "97,245.00", change: "+2.4%", positive: true, logo: "₿" },
@@ -70,8 +72,47 @@ const brokers = [
 export default function Home() {
   const [selectedCrypto, setSelectedCrypto] = useState(cryptos[0])
   const [currentView, setCurrentView] = useState<"home" | "upload" | "instant" | "community" | "brokers" | "plans">("home")
-  const [chartData, setChartData] = useState<Array<{ height: number; isGreen: boolean }>>([])
+  const [chartData, setChartData] = useState<Array<{ height: number; isGreen: boolean }>>([])]
   const [connectedBrokers, setConnectedBrokers] = useState<string[]>([])
+  const [user, setUser] = useState<any>(null)
+  const [showAuthModal, setShowAuthModal] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  // Verifica autenticação do usuário
+  useEffect(() => {
+    checkUser()
+
+    if (supabase && isSupabaseConfigured()) {
+      const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+        setUser(session?.user ?? null)
+      })
+
+      return () => {
+        authListener.subscription.unsubscribe()
+      }
+    }
+  }, [])
+
+  const checkUser = async () => {
+    try {
+      if (supabase && isSupabaseConfigured()) {
+        const { data: { session } } = await supabase.auth.getSession()
+        setUser(session?.user ?? null)
+      }
+    } catch (error) {
+      console.error("Erro ao verificar usuário:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    if (supabase && isSupabaseConfigured()) {
+      await supabase.auth.signOut()
+    }
+    setUser(null)
+    setConnectedBrokers([])
+  }
 
   // Gera dados do gráfico apenas no cliente para evitar erro de hidratação
   useEffect(() => {
@@ -97,6 +138,11 @@ export default function Home() {
   }, [])
 
   const handleCreateAccount = (broker: typeof brokers[0]) => {
+    if (!user) {
+      setShowAuthModal(true)
+      return
+    }
+
     // Abre a URL da corretora em nova aba
     window.open(broker.url, '_blank', 'noopener,noreferrer')
     
@@ -112,14 +158,40 @@ export default function Home() {
   }
 
   const handleOperateNow = (broker: typeof brokers[0]) => {
+    if (!user) {
+      setShowAuthModal(true)
+      return
+    }
+
     if (connectedBrokers.includes(broker.id)) {
       // Abre a plataforma de trading
       window.open(broker.url, '_blank', 'noopener,noreferrer')
     }
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0E0E10] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-[#00C2FF] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-400">Carregando...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[#0E0E10] text-white">
+      {showAuthModal && (
+        <AuthModal
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={() => {
+            setShowAuthModal(false)
+            checkUser()
+          }}
+        />
+      )}
+
       {/* Header */}
       <header className="border-b border-gray-800 bg-[#0E0E10]/95 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
@@ -139,16 +211,42 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Badge variant="outline" className="border-[#00C2FF] text-[#00C2FF] bg-[#00C2FF]/10">
-                Plano Grátis
-              </Badge>
-              <Button 
-                onClick={() => setCurrentView("plans")}
-                className="bg-gradient-to-r from-[#00FF88] to-[#00C2FF] text-[#0E0E10] hover:opacity-90 font-semibold"
-              >
-                <Crown className="w-4 h-4 mr-2" />
-                Upgrade
-              </Button>
+              {user ? (
+                <>
+                  <div className="flex items-center gap-2 px-3 py-2 bg-gray-800/50 rounded-lg">
+                    <User className="w-4 h-4 text-[#00C2FF]" />
+                    <span className="text-sm text-gray-300">
+                      {user.email?.split('@')[0]}
+                    </span>
+                  </div>
+                  <Badge variant="outline" className="border-[#00C2FF] text-[#00C2FF] bg-[#00C2FF]/10">
+                    Plano Grátis
+                  </Badge>
+                  <Button 
+                    onClick={() => setCurrentView("plans")}
+                    className="bg-gradient-to-r from-[#00FF88] to-[#00C2FF] text-[#0E0E10] hover:opacity-90 font-semibold"
+                  >
+                    <Crown className="w-4 h-4 mr-2" />
+                    Upgrade
+                  </Button>
+                  <Button
+                    onClick={handleLogout}
+                    variant="ghost"
+                    size="icon"
+                    className="text-gray-400 hover:text-white"
+                  >
+                    <LogOut className="w-5 h-5" />
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  onClick={() => setShowAuthModal(true)}
+                  className="bg-gradient-to-r from-[#00FF88] to-[#00C2FF] text-[#0E0E10] hover:opacity-90 font-semibold"
+                >
+                  <User className="w-4 h-4 mr-2" />
+                  Entrar / Cadastrar
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -195,9 +293,11 @@ export default function Home() {
                   <Activity className="w-5 h-5 text-[#00C2FF]" />
                   Criptomoedas em Destaque
                 </h2>
-                <Badge className="bg-green-500/20 text-green-400 border-green-500/30 animate-pulse">
-                  🟢 Conectado às Corretoras
-                </Badge>
+                {user && connectedBrokers.length > 0 && (
+                  <Badge className="bg-green-500/20 text-green-400 border-green-500/30 animate-pulse">
+                    🟢 {connectedBrokers.length} {connectedBrokers.length === 1 ? 'Corretora Conectada' : 'Corretoras Conectadas'}
+                  </Badge>
+                )}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
                 {cryptos.map((crypto) => (
@@ -274,21 +374,21 @@ export default function Home() {
               {/* Action Buttons */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
                 <Button
-                  onClick={() => setCurrentView("upload")}
+                  onClick={() => user ? setCurrentView("upload") : setShowAuthModal(true)}
                   className="bg-gradient-to-r from-[#00C2FF] to-[#00FF88] text-[#0E0E10] hover:opacity-90 font-semibold h-14"
                 >
                   <Upload className="w-5 h-5 mr-2" />
                   Enviar Print para Análise
                 </Button>
                 <Button
-                  onClick={() => setCurrentView("instant")}
+                  onClick={() => user ? setCurrentView("instant") : setShowAuthModal(true)}
                   className="bg-gradient-to-r from-[#FF2E45] to-[#FF6B45] text-white hover:opacity-90 font-semibold h-14"
                 >
                   <Zap className="w-5 h-5 mr-2" />
                   IA Instantânea (Premium)
                 </Button>
                 <Button
-                  onClick={() => setCurrentView("brokers")}
+                  onClick={() => user ? setCurrentView("brokers") : setShowAuthModal(true)}
                   variant="outline"
                   className="border-[#00C2FF] text-[#00C2FF] hover:bg-[#00C2FF]/10 font-semibold h-14"
                 >
@@ -466,18 +566,41 @@ export default function Home() {
                 <Building2 className="w-6 h-6 text-[#00C2FF]" />
                 Corretoras Parceiras
               </h2>
-              {connectedBrokers.length > 0 && (
+              {user && connectedBrokers.length > 0 && (
                 <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
                   {connectedBrokers.length} {connectedBrokers.length === 1 ? 'Conta Conectada' : 'Contas Conectadas'}
                 </Badge>
               )}
             </div>
             
-            <div className="bg-gradient-to-r from-[#00C2FF]/10 to-[#00FF88]/10 border border-[#00C2FF]/30 rounded-lg p-4 mb-6">
-              <p className="text-sm text-gray-300 text-center">
-                💡 <strong>Conecte-se com um clique!</strong> Crie sua conta nas corretoras parceiras e opere diretamente pelo SignalMaster AI.
-              </p>
-            </div>
+            {!user && (
+              <Card className="bg-gradient-to-r from-[#FF2E45]/10 to-[#FF6B45]/10 border border-[#FF2E45]/30 p-6">
+                <div className="text-center space-y-4">
+                  <User className="w-12 h-12 mx-auto text-[#FF2E45]" />
+                  <div>
+                    <h3 className="text-xl font-bold text-white mb-2">Faça login para conectar corretoras</h3>
+                    <p className="text-gray-400 mb-4">
+                      Crie sua conta no SignalMaster AI para gerenciar suas conexões com as corretoras
+                    </p>
+                    <Button
+                      onClick={() => setShowAuthModal(true)}
+                      className="bg-gradient-to-r from-[#00FF88] to-[#00C2FF] text-[#0E0E10] hover:opacity-90 font-semibold"
+                    >
+                      <User className="w-4 h-4 mr-2" />
+                      Entrar / Cadastrar
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {user && (
+              <div className="bg-gradient-to-r from-[#00C2FF]/10 to-[#00FF88]/10 border border-[#00C2FF]/30 rounded-lg p-4 mb-6">
+                <p className="text-sm text-gray-300 text-center">
+                  💡 <strong>Conecte-se com um clique!</strong> Crie sua conta nas corretoras parceiras e opere diretamente pelo SignalMaster AI.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {brokers.map((broker) => {
@@ -517,9 +640,11 @@ export default function Home() {
                       <div className="space-y-2">
                         <Button 
                           onClick={() => handleCreateAccount(broker)}
-                          disabled={isConnected}
+                          disabled={isConnected || !user}
                           className={`w-full ${
                             isConnected
+                              ? 'bg-gray-700 cursor-not-allowed text-gray-400'
+                              : !user
                               ? 'bg-gray-700 cursor-not-allowed text-gray-400'
                               : 'bg-[#00C2FF] hover:bg-[#00C2FF]/90'
                           }`}
@@ -539,7 +664,7 @@ export default function Home() {
                         
                         <Button 
                           onClick={() => handleOperateNow(broker)}
-                          disabled={!isConnected}
+                          disabled={!isConnected || !user}
                           variant="outline" 
                           className={`w-full ${
                             isConnected
@@ -560,7 +685,7 @@ export default function Home() {
                         </Button>
                       </div>
                       
-                      {!isConnected && (
+                      {!isConnected && user && (
                         <p className="text-xs text-gray-500 text-center">
                           Crie sua conta para habilitar operações
                         </p>
